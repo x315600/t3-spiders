@@ -4,7 +4,7 @@
       "key": "girigiri",
       "name": "girigiri愛動漫",
       "type": 3,
-      "api": "https://ghfast.top/https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_girigiri.py",
+      "api": "https://ghfast.top/https://github.com/x315600/t3-spiders/raw/refs/heads/main/spider_girigiri.py",
       "searchable": 1,
       "quickSearch": 1,
       "filterable": 1,
