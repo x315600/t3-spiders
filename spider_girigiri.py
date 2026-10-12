@@ -270,14 +270,17 @@ class Spider(BaseSpider):
             label = label.replace("$", "＄").replace("#", "＃")
             lines[sid].append((label, nid))
 
-        froms, plays = [], []
-        for sid in order:
+        entries = []
+        for idx, sid in enumerate(order):
             eps = lines[sid]
-            code = ""
             first = self._get("%s/playGV%s-%s-%s/" % (self.host, vid, sid, eps[0][1]))
             code = str(self._player_data(first).get("from") or "")
-            froms.append(FROM_NAME.get(code, code or ("线路%s" % sid)))
-            plays.append("#".join("%s$%s@@%s@@%s" % (label, vid, sid, nid) for label, nid in eps))
+            entries.append((0 if code == "chs" else 1, idx,
+                            FROM_NAME.get(code, code or ("线路%s" % sid)),
+                            "#".join("%s$%s@@%s@@%s" % (label, vid, sid, nid) for label, nid in eps)))
+        entries.sort(key=lambda e: (e[0], e[1]))  # 简体(chs)线排最前, 其余保持站内顺序
+        froms = [e[2] for e in entries]
+        plays = [e[3] for e in entries]
         max_nid = max((int(n) for _, n in lines[order[0]]) ) if order else 0
         vod = {
             "vod_id": vid,
