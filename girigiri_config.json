@@ -1,0 +1,36 @@
+{
+  "sites": [
+    {
+      "key": "girigiri",
+      "name": "girigiri愛動漫",
+      "type": 3,
+      "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_girigiri.py",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1,
+      "changeable": 1,
+      "ext": {
+        "host": "https://ani.girigirilove.com"
+      }
+    }
+  ],
+  "lives": [],
+  "parses": [],
+  "doh": [],
+  "flags": [
+    "youku",
+    "qq",
+    "iqiyi",
+    "qiyi",
+    "letv",
+    "sohu",
+    "tudou",
+    "pptv",
+    "mgtv"
+  ],
+  "ads": [
+    "wan.51img1.com",
+    "iqiyi.hbuioo.com",
+    "vip.ffzyad.com"
+  ]
+}
