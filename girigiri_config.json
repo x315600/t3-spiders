@@ -36,6 +36,17 @@
       "filterable": 1,
       "changeable": 1,
       "ext": {}
+    },
+    {
+      "key": "kanju1",
+      "name": "看剧AI",
+      "type": 3,
+      "api": "https://gh-proxy.com/https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_kanju1.py",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1,
+      "changeable": 1,
+      "ext": {}
     }
   ],
   "lives": [],
