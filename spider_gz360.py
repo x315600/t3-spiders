@@ -206,10 +206,13 @@ class Spider(BaseSpider):
 
     def playerContent(self, flag, id, vipFlags):
         # 壳已按 $ 切掉集名, id 即 m3u8 直链
-        url = str(id).rsplit("$", 1)[-1]
+        url = str(id).rsplit("$", 1)[-1].strip()
         if url.startswith("http"):
-            return {"parse": 0, "url": url,
-                    "header": {"User-Agent": self.UA}}
+            return {"parse": 0, "url": url, "header": {
+                "User-Agent": self.UA,
+                "Referer": "https://gz360.tv/",
+                "Origin": "https://gz360.tv",
+            }}
         return {"parse": 0, "url": url, "header": {}}
 
     def isVideoFormat(self, url):
