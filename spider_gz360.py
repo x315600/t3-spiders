@@ -33,6 +33,9 @@ class Spider(BaseSpider):
         {"type_id": "4", "type_name": "动漫"},
         {"type_id": "64", "type_name": "短剧"},
     ]
+    # 分类 pid 映射 (Category/GetChoiceList, 实测)
+    # pid=3→电影 pid=4→电视剧 pid=6→综艺 pid=5→动漫 pid=1→精选(混)
+    PID_MAP = {"1": 3, "2": 4, "3": 6, "4": 5}
     UA = ("Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 "
           "Chrome/131.0.0.0 Mobile Safari/537.36")
 
@@ -112,7 +115,23 @@ class Spider(BaseSpider):
         return {"list": lst}
 
     def categoryContent(self, tid, pg, filter, extend):
-        # 站方未暴露按t_id分页的列表接口,用latest按t_id过滤
+        pg = int(pg) if str(pg).isdigit() else 1
+        pid = self.PID_MAP.get(str(tid))
+        if pid:
+            # 分页接口
+            data = self._post("/Category/GetChoiceList",
+                              {"pid": pid, "page": pg, "page_size": 30}) or {}
+            lst = [v for v in (self._vod(x) for x in data.get("list", [])) if v]
+            total = int(data.get("total") or 0)
+            pagecount = max(1, (total + 29) // 30) if total else 1
+            return {
+                "list": lst,
+                "page": pg,
+                "pagecount": pagecount,
+                "limit": 30,
+                "total": total,
+            }
+        # 短剧无对应pid, 用latest按t_id过滤(单页)
         data = self._post("/Index/latestVideo", {}) or []
         lst = []
         for x in data:
@@ -121,8 +140,8 @@ class Spider(BaseSpider):
                 if v:
                     lst.append(v)
         return {
-            "list": lst,
-            "page": 1,
+            "list": lst if pg == 1 else [],
+            "page": pg,
             "pagecount": 1,
             "limit": 20,
             "total": len(lst),
