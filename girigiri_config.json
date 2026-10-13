@@ -12,6 +12,30 @@
       "ext": {
         "host": "https://ani.girigirilove.com"
       }
+    },
+    {
+      "key": "ppys",
+      "name": "皮皮影视",
+      "type": 3,
+      "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_ppys.py",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1,
+      "changeable": 1,
+      "ext": {
+        "host": "https://www.ppys.live"
+      }
+    },
+    {
+      "key": "gz360",
+      "name": "瓜子影视",
+      "type": 3,
+      "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_gz360.py",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1,
+      "changeable": 1,
+      "ext": {}
     }
   ],
   "lives": [],
