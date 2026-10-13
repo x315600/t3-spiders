@@ -32,7 +32,7 @@ class Spider(BaseSpider):
         {"type_id": "26", "type_name": "番剧"},
     ]
     # 各分类剧情选项(站内筛选实测)
-    # 各分类筛选选项(站内实测原样抠取, 各分类选项不同)
+    # 各分类筛选选项(站内 vodtype 分类页实测, 只有剧情/地区/年份三组)
     FILTERS = {
         "1": {
             "class": ["爱情", "古装", "悬疑", "都市", "喜剧", "战争", "剧情", "青春",
@@ -40,8 +40,6 @@ class Spider(BaseSpider):
                       "穿越", "农村", "人物", "商业", "生活", "其他"],
             "area": ["中国大陆", "中国香港", "中国台湾", "日本", "韩国", "泰国",
                      "欧美", "新加坡", "其他"],
-            "lang": ["国语", "英语", "粤语", "闽南语", "韩语", "日语", "法语",
-                     "德语", "其它"],
         },
         "2": {
             "class": ["爱情", "古装", "动作", "伦理", "悬疑", "犯罪", "谍战", "历史",
@@ -49,29 +47,28 @@ class Spider(BaseSpider):
                       "人物", "文化", "纪录", "其他"],
             "area": ["中国大陆", "中国香港", "中国台湾", "日本", "韩国", "泰国",
                      "欧美", "印度", "马来西亚", "其他"],
-            "lang": ["国语", "英语", "粤语", "闽南语", "韩语", "日语", "其它"],
         },
         "3": {
             "class": ["冒险", "战斗", "搞笑", "经典", "科幻", "玄幻", "魔幻", "武侠",
                       "恋爱", "推理", "日常", "校园", "悬疑", "真人", "历史", "竞技",
                       "其他"],
             "area": ["中国大陆", "日本", "韩国", "欧美", "其他"],
-            "lang": ["国语", "英语", "粤语", "闽南语", "韩语", "日语", "其它"],
         },
         "4": {
             "class": ["游戏", "脱口秀", "音乐", "情感", "生活", "职场", "真人秀",
                       "搞笑", "公益", "艺术", "访谈", "益智", "体育", "少儿", "时尚",
                       "人物", "其他"],
             "area": ["中国大陆", "港台", "韩国", "欧美", "其他"],
-            "lang": ["国语", "英语", "粤语", "闽南语", "韩语", "日语", "其它"],
         },
-        "5": {},
+        "5": {
+            "class": ["都市", "古装", "重生", "逆袭", "虐恋", "职场", "萌宝", "言情",
+                      "战神", "神医", "赘婿", "甜宠", "其他"],
+        },
         "26": {},
     }
-    # 年份: 1/2/3/4 为17项(2026-2011+其它), 5 为8项
+    # 年份: 1/2/3/4 为17项(2026-2011+其它), 5 为8项, 26 无
     YEARS_FULL = ([str(y) for y in range(2026, 2010, -1)] + ["其它"])
     YEARS_SJ = ([str(y) for y in range(2026, 2019, -1)] + ["其它"])
-    LETTERS = ([chr(c) for c in range(ord("A"), ord("Z") + 1)] + ["0-9"])
     UA = ("Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 "
           "Chrome/131.0.0.0 Mobile Safari/537.36")
 
@@ -131,22 +128,21 @@ class Spider(BaseSpider):
 
     def homeContent(self, filter):
         # TVBox 标准格式: filters[type_id] = [{key,name,value:[{n,v}]}]
-        # 选项与站内各分类筛选逐项对齐
-        names = {"class": "剧情", "area": "地区", "year": "年份",
-                 "lang": "语言", "letter": "字母"}
+        # 与站内 vodtype 分类页三组筛选对齐: 剧情/地区/年份
+        names = {"class": "按剧情", "area": "按地区", "year": "按年份"}
         filters = {}
         for tid in ("1", "2", "3", "4", "5", "26"):
             fl = []
             cfg = self.FILTERS.get(tid, {})
-            for key in ("class", "area", "lang"):
+            for key in ("class", "area"):
                 if cfg.get(key):
                     fl.append(self._filter_item(key, names[key], cfg[key]))
             if tid == "5":
-                fl.append(self._filter_item("year", "年份", self.YEARS_SJ))
+                fl.append(self._filter_item("year", "按年份", self.YEARS_SJ))
             elif tid in ("1", "2", "3", "4"):
-                fl.append(self._filter_item("year", "年份", self.YEARS_FULL))
-            fl.append(self._filter_item("letter", "字母", self.LETTERS))
-            filters[tid] = fl
+                fl.append(self._filter_item("year", "按年份", self.YEARS_FULL))
+            if fl:
+                filters[tid] = fl
         return {"class": self.CATES, "filters": filters}
 
     def homeVideoContent(self):
