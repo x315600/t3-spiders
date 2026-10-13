@@ -100,16 +100,22 @@ class Spider(BaseSpider):
     def _opts(self, items):
         return [{"n": "全部", "v": ""}] + [{"n": x, "v": x} for x in items]
 
+    def _filter_item(self, key, name, items):
+        return {"key": key, "name": name,
+                "value": [{"n": "全部", "v": ""}] +
+                         [{"n": x, "v": x} for x in items]}
+
     def homeContent(self, filter):
+        # TVBox 标准格式: filters[type_id] = [{key,name,value:[{n,v}]}]
         filters = {}
         for tid in ("1", "2", "3", "4"):
-            f = {}
+            fl = []
             if tid in self.CLASSES:
-                f["class"] = self._opts(self.CLASSES[tid])
-            f["area"] = self._opts(self.AREAS)
-            f["year"] = self._opts(self.YEARS)
-            f["lang"] = self._opts(self.LANGS)
-            filters[tid] = f
+                fl.append(self._filter_item("class", "剧情", self.CLASSES[tid]))
+            fl.append(self._filter_item("area", "地区", self.AREAS))
+            fl.append(self._filter_item("year", "年份", self.YEARS))
+            fl.append(self._filter_item("lang", "语言", self.LANGS))
+            filters[tid] = fl
         return {"class": self.CATES, "filters": filters}
 
     def homeVideoContent(self):
