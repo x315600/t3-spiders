@@ -107,6 +107,7 @@ class Spider(BaseSpider):
 
     def homeContent(self, filter):
         # TVBox 标准格式: filters[type_id] = [{key,name,value:[{n,v}]}]
+        # 5(爽剧)/26(番剧) 站内只有年份/字母有选项
         filters = {}
         for tid in ("1", "2", "3", "4"):
             fl = []
@@ -116,6 +117,15 @@ class Spider(BaseSpider):
             fl.append(self._filter_item("year", "年份", self.YEARS))
             fl.append(self._filter_item("lang", "语言", self.LANGS))
             filters[tid] = fl
+        filters["5"] = [
+            self._filter_item("year", "年份", self.YEARS),
+            self._filter_item("letter", "字母",
+                              [chr(c) for c in range(ord("A"), ord("Z") + 1)]),
+        ]
+        filters["26"] = [
+            self._filter_item("letter", "字母",
+                              [chr(c) for c in range(ord("A"), ord("Z") + 1)]),
+        ]
         return {"class": self.CATES, "filters": filters}
 
     def homeVideoContent(self):
@@ -124,26 +134,43 @@ class Spider(BaseSpider):
 
     def _parse_list(self, html):
         vods = []
+        # 只解析主列表区, 排除猜你喜欢/排行等区块
+        m0 = re.search(r'<ul class="stui-vodlist clearfix">(.*?)</ul>',
+                       html, re.S)
+        html = m0.group(1) if m0 else html
+        # 两种结构: 图在 <a data-original> 上 / 图在内层 <img data-original> 上
         for m in re.finditer(
-                r'<a[^>]*href="(/voddetail/(\d+)\.html)"[^>]*title="([^"]+)"[^>]*>.*?'
-                r'(?:data-original="([^"]+)"|src="([^"]+)")',
-                html, re.S):
-            vid, name = m.group(2), m.group(3)
-            pic = m.group(4) or m.group(5) or ""
+                r'<a[^>]*href="/voddetail/(\d+)\.html"[^>]*>', html):
+            tag = m.group(0)
+            vid = m.group(1)
+            tm = re.search(r'title="([^"]+)"', tag)
+            name = tm.group(1) if tm else ""
+            # 1) a标签自身的图
+            pm = re.search(r'data-original="([^"]+)"', tag)
+            pic = pm.group(1) if pm else ""
+            # 2) 内层 img 的图
+            if not pic or "load.gif" in pic:
+                seg = html[m.end():m.end() + 1500]
+                im = re.search(r'data-original="([^"]+)"', seg)
+                # 确保是本项的 img (在下一个 <a href=/voddetail 之前)
+                nm = re.search(r'<a[^>]*href="/voddetail/', seg)
+                if im and (not nm or im.start() < nm.start()):
+                    pic = im.group(1)
             if "load.gif" in pic:
                 pic = ""
-            # 备注: 更新至X集
             remark = ""
-            rm = re.search(r'pic-text[^>]*>([^<]{1,20})<',
-                           html[m.start():m.start() + 2000])
-            if rm:
+            seg = html[m.end():m.end() + 2000]
+            rm = re.search(r'pic-text[^>]*>([^<]{1,20})<', seg)
+            nm2 = re.search(r'<a[^>]*href="/voddetail/', seg)
+            if rm and (not nm2 or rm.start() < nm2.start()):
                 remark = self._clean(rm.group(1))
-            vods.append({
-                "vod_id": vid,
-                "vod_name": self._clean(name),
-                "vod_pic": self._abs(pic),
-                "vod_remarks": remark,
-            })
+            if vid and name:
+                vods.append({
+                    "vod_id": vid,
+                    "vod_name": self._clean(name),
+                    "vod_pic": self._abs(pic),
+                    "vod_remarks": remark,
+                })
         seen, out = set(), []
         for v in vods:
             if v["vod_id"] not in seen:
@@ -161,18 +188,20 @@ class Spider(BaseSpider):
         return pg + 1
 
     def _list_url(self, tid, pg, extend):
-        # 12段: [1]=地区 [3]=剧情 [4]=语言 [8]=页码 [11]=年份
-        seg = [""] * 12
+        # tid后11参: [0]=地区 [2]=剧情 [3]=语言 [4]=字母 [7]=页码 [10]=年份
+        seg = [""] * 11
         if isinstance(extend, dict):
             if extend.get("area"):
-                seg[1] = extend["area"]
+                seg[0] = extend["area"]
             if extend.get("class"):
-                seg[3] = extend["class"]
+                seg[2] = extend["class"]
             if extend.get("lang"):
-                seg[4] = extend["lang"]
+                seg[3] = extend["lang"]
+            if extend.get("letter"):
+                seg[4] = extend["letter"]
             if extend.get("year"):
-                seg[11] = extend["year"]
-        seg[8] = str(pg) if pg > 1 else ""
+                seg[10] = extend["year"]
+        seg[7] = str(pg) if pg > 1 else ""
         parts = [urllib.parse.quote(s) if s else "" for s in seg]
         return "{0}/vodshow/{1}-{2}.html".format(
             self.host, tid, "-".join(parts))
