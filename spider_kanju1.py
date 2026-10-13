@@ -3,7 +3,12 @@
 # 站点：AI 对话式影视发现，Vue SPA
 # API：HMAC-SHA256 签名，key 硬编码于前端 bundle
 #   msg = f"{METHOD}\n{path}{query}\n{timestamp_ms}\n{nonce_hex32}"
-# 播放链：/v1/playback/resolve/{token} -> /v1/playback/resolve-line -> 真实地址(字节跳动TOS签名URL)
+# 播放链（2026-10-13 实测打通）：
+#   /v1/catalog/{variant_id}/episodes -> episodes[i].token（单集 token，
+#     注意不是 variant_id！variant_id 调 resolve 报 invalid_public_playback_id）
+#   -> GET /v1/playback/resolve/{episode_token}?view=compact
+#     -> line_options[]（id/label/url=resolve://{ticket}/selected）
+#   -> POST /v1/playback/resolve-line {"ticket": ticket} -> 真实地址(字节跳动TOS签名URL)
 
 import hashlib
 import hmac
@@ -12,6 +17,7 @@ import secrets
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 import http.cookiejar
 
 try:
@@ -22,7 +28,9 @@ except ImportError:
         def init(self, extend=""): pass
         def destroy(self): pass
 
-API_BASE = "https://kanju1.ai"
+# API 域名三级自愈：kanju48.com 为真实内容站，kanju1.ai 只是门户（2026-10-13 沙盒直连 kanju1.ai 曾被拒）
+API_HOSTS = ["https://kanju48.com", "https://kanju1.ai"]
+API_BASE = API_HOSTS[0]
 SIGN_KEY = "557d0e4ae929f438da6bd84412374e6086b8af09b3fed54bf22601d5bf8c54a0"
 
 CLIENT_HEADERS = {
@@ -64,7 +72,8 @@ class Spider(_BaseSpider):
 
     def isVideoFormat(self, url):
         url = (url or "").lower()
-        return any(url.split("?")[0].endswith(x) for x in (".m3u8", ".mp4", ".mkv", ".flv", ".ts"))
+        return any(url.split("?")[0].endswith(x) for x in (
+            ".m3u8", ".mp4", ".mkv", ".flv", ".ts"))
 
     def manualVideoCheck(self):
         return False
@@ -99,29 +108,49 @@ class Spider(_BaseSpider):
 
     def _api(self, method, path_qs, body=None, timeout=25, retries=2):
         last_err = None
-        for _ in range(retries + 1):
+        for host in API_HOSTS:
+            for _ in range(retries + 1):
+                try:
+                    headers = self._sign_headers(method, path_qs)
+                    data = json.dumps(body).encode("utf-8") if body is not None else None
+                    if data:
+                        headers["Content-Type"] = "application/json"
+                    req = urllib.request.Request(host + path_qs, data=data, headers=headers, method=method)
+                    with self._opener.open(req, timeout=timeout) as r:
+                        raw = r.read()
+                        return json.loads(raw.decode("utf-8")) if raw else {}
+                except urllib.error.HTTPError as e:
+                    try:
+                        err_body = e.read()[:500].decode("utf-8", "ignore")
+                    except Exception:
+                        err_body = ""
+                    last_err = f"HTTP {e.code} {err_body[:120]}"
+                    if e.code in (400, 401, 402, 403):
+                        return self._api_fallback_4xx(host, method, path_qs, body, e.code, err_body)
+                    time.sleep(1)
+                except Exception as e:
+                    # 连接层失败（DNS/隧道被拒等）：换下一个 host
+                    last_err = f"{host} {str(e)[:100]}"
+                    break
+        raise RuntimeError(f"API {method} {path_qs} 失败: {last_err}")
+
+    def _api_fallback_4xx(self, host, method, path_qs, body, code, err_body):
+        # 4xx 说明签名/host 组合不对：换下一个 host 重试一次，仍 4xx 则直接抛
+        idx = API_HOSTS.index(host)
+        if idx + 1 < len(API_HOSTS):
             try:
                 headers = self._sign_headers(method, path_qs)
                 data = json.dumps(body).encode("utf-8") if body is not None else None
                 if data:
                     headers["Content-Type"] = "application/json"
-                req = urllib.request.Request(API_BASE + path_qs, data=data, headers=headers, method=method)
-                with self._opener.open(req, timeout=timeout) as r:
+                req = urllib.request.Request(API_HOSTS[idx + 1] + path_qs, data=data,
+                                             headers=headers, method=method)
+                with self._opener.open(req, timeout=25) as r:
                     raw = r.read()
                     return json.loads(raw.decode("utf-8")) if raw else {}
-            except urllib.error.HTTPError as e:
-                try:
-                    err_body = e.read()[:500].decode("utf-8", "ignore")
-                except Exception:
-                    err_body = ""
-                last_err = f"HTTP {e.code} {err_body[:120]}"
-                if e.code in (400, 401, 402, 403):
-                    break
-                time.sleep(1)
-            except Exception as e:
-                last_err = str(e)[:120]
-                time.sleep(1)
-        raise RuntimeError(f"API {method} {path_qs} 失败: {last_err}")
+            except Exception:
+                pass
+        raise RuntimeError(f"API {method} {path_qs} 失败: HTTP {code} {err_body[:120]}")
 
     # ---------- 卡片 ----------
     def _card(self, c):
@@ -209,44 +238,54 @@ class Spider(_BaseSpider):
 
     def detailContent(self, ids):
         vid = ids[0] if ids else ""
-        # 先从 catalog 按 id 精确找（suggest 的 variant_id 与 catalog 卡片 id 同格式）
         vod = {"vod_id": vid, "vod_name": "", "vod_pic": "",
                "vod_year": "", "vod_area": "", "vod_remarks": "",
                "vod_actor": "", "vod_director": "", "vod_content": "",
                "vod_play_from": "", "vod_play_url": ""}
         try:
-            # 用 suggest 反查标题（variant_id -> title）
-            # catalog 里按页找太慢，直接用已知的 vid 拼详情
-            data = self._api("GET", "/v1/browse/catalog?" + urllib.parse.urlencode(
-                {"page": 1, "limit": 20, "intent": "latest_catalog"}))
-            card = None
-            for c in data.get("cards", []):
-                if c.get("id") == vid:
-                    card = c
-                    break
-            if card:
-                vod.update({
-                    "vod_name": card.get("title") or "",
-                    "vod_pic": card.get("poster_url") or "",
-                    "vod_year": str(card.get("year") or ""),
-                    "vod_area": card.get("area") or "",
-                    "vod_remarks": card.get("remark") or "",
-                    "vod_actor": " ".join(card.get("actors") or []),
-                    "vod_director": " ".join(card.get("directors") or []),
-                    "vod_content": (card.get("overview") or card.get("description") or "").strip(),
-                })
-                groups = card.get("playback_groups") or []
-                play_from, play_url = [], []
-                for g in groups:
-                    label = (g.get("label") or g.get("id") or "线路").replace("$", "＄").replace("#", "＃")
-                    ep_count = int(g.get("episode_count") or 1)
-                    # catalog 未返回 episodes 明细，按集数生成占位分集
-                    eps = [f"第{i + 1}集${vid}@@{g.get('id', '')}@@{i}" for i in range(min(ep_count, 200))]
-                    if eps:
-                        play_from.append(label)
-                        play_url.append("#".join(eps))
-                vod["vod_play_from"] = "$$$".join(play_from)
-                vod["vod_play_url"] = "$$$".join(play_url)
+            q = urllib.parse.quote(vid, safe="")
+            # 详情直调（不再依赖 catalog 第 1 页匹配，搜索结果也能出详情）
+            d = self._api("GET", f"/v1/catalog/{q}/detail")
+            vod.update({
+                "vod_name": d.get("title") or d.get("normalized_title") or "",
+                "vod_pic": d.get("poster_url") or "",
+                "vod_year": str(d.get("year") or ""),
+                "vod_area": d.get("area") or "",
+                "vod_remarks": d.get("remarks") or "",
+                "vod_actor": " ".join(d.get("actors") or []),
+                "vod_director": " ".join(d.get("directors") or []),
+                "vod_content": (d.get("description") or "").strip(),
+            })
+            total = int(d.get("episode_count") or d.get("total_episode_count") or 0)
+            # 用第 1 集的单集 token 反解出真实线路列表
+            lines = []
+            try:
+                e = self._api("GET", f"/v1/catalog/{q}/episodes?limit=1")
+                eps = e.get("episodes") or []
+                total = int((e.get("episode_pagination") or {}).get("total_count")
+                            or total or len(eps))
+                if eps and eps[0].get("token"):
+                    r = self._api("GET", "/v1/playback/resolve/" +
+                                  urllib.parse.quote(eps[0]["token"], safe="") + "?view=compact")
+                    lines = r.get("line_options") or []
+            except Exception:
+                lines = []
+            ep_n = min(max(total, 1), 500)
+            play_from, play_url = [], []
+            if lines:
+                for opt in lines:
+                    lid = str(opt.get("id") or opt.get("play_from") or "")
+                    label = (str(opt.get("label") or lid or "线路")).replace("$", "＄").replace("#", "＃")
+                    eps_list = [f"第{i + 1}集${vid}@@{lid}@@{i}" for i in range(ep_n)]
+                    play_from.append(label)
+                    play_url.append("#".join(eps_list))
+            else:
+                # resolve 失败也先列出分集，播放时再试
+                eps_list = [f"第{i + 1}集${vid}@@@@{i}" for i in range(ep_n)]
+                play_from.append("默认线路")
+                play_url.append("#".join(eps_list))
+            vod["vod_play_from"] = "$$$".join(play_from)
+            vod["vod_play_url"] = "$$$".join(play_url)
         except Exception:
             pass
         return {"list": [vod]}
@@ -260,30 +299,46 @@ class Spider(_BaseSpider):
             ep_idx = int(parts[2]) if len(parts) > 2 and str(parts[2]).isdigit() else 0
         except Exception:
             return {"parse": 0, "msg": "播放参数解析失败"}
+        if not vid:
+            return {"parse": 0, "msg": "缺少 vid"}
 
-        # 尝试 resolve 链拿真实地址
+        # 真实播放链：单集 token -> resolve -> ticket -> resolve-line -> 直链
         try:
-            token = urllib.parse.quote(vid, safe="")
-            params = urllib.parse.urlencode({
-                "view": "compact", "line": line_id, "episode_index": ep_idx,
-            })
-            r = self._api("GET", f"/v1/playback/resolve/{token}?" + params)
-            line_options = r.get("line_options") or []
-            ticket = ""
-            for opt in line_options:
-                if not line_id or opt.get("id") == line_id or opt.get("line") == line_id:
-                    ticket = opt.get("ticket") or opt.get("resolve_ticket") or ""
-                    if ticket:
-                        break
-            if not ticket and line_options:
-                ticket = line_options[0].get("ticket") or ""
-            if ticket:
-                r2 = self._api("POST", "/v1/playback/resolve-line?view=compact", {"ticket": ticket})
-                url = (((r2.get("a") or {}).get("line") or {}).get("url")
-                       or (r2.get("line") or {}).get("url") or "")
-                if url:
-                    return {"parse": 0, "url": url,
-                            "header": {"User-Agent": PLAYER_UA, "Referer": API_BASE + "/"}}
+            q = urllib.parse.quote(vid, safe="")
+            base = (ep_idx // 200) * 200
+            e = self._api("GET", f"/v1/catalog/{q}/episodes?limit=200&offset={base}")
+            eps = e.get("episodes") or []
+            li = ep_idx - base
+            if li < 0 or li >= len(eps):
+                raise RuntimeError("集数越界")
+            ep_token = eps[li].get("token") or ""
+            if not ep_token:
+                raise RuntimeError("无单集 token")
+            r = self._api("GET", "/v1/playback/resolve/" +
+                          urllib.parse.quote(ep_token, safe="") + "?view=compact")
+            opts = r.get("line_options") or []
+            if not opts:
+                raise RuntimeError("无可用线路")
+            pick = None
+            for o in opts:
+                if line_id and line_id in (str(o.get("id") or ""),
+                                           str(o.get("play_from") or ""),
+                                           str(o.get("label") or "")):
+                    pick = o
+                    break
+            if pick is None:
+                pick = next((o for o in opts if o.get("selected")), opts[0])
+            url = str(pick.get("url") or "")
+            ticket = url[len("resolve://"):] if url.startswith("resolve://") else url
+            if not ticket:
+                raise RuntimeError("无 ticket")
+            r2 = self._api("POST", "/v1/playback/resolve-line?view=compact", {"ticket": ticket})
+            real = (((r2.get("a") or {}).get("line") or {}).get("url")
+                    or (r2.get("line") or {}).get("url")
+                    or r2.get("url") or "")
+            if real:
+                return {"parse": 0, "url": real,
+                        "header": {"User-Agent": PLAYER_UA, "Referer": API_BASE + "/"}}
         except Exception:
             pass
 
