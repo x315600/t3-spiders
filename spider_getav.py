@@ -62,17 +62,26 @@ class Spider(Spider):
             print(f"[{self.getName()}] 发布页抓取失败: {e}")
         return []
     def _pick_fastest(self, hosts):
-        best, best_time = None, float("inf")
-        for h in hosts:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        def _probe(h):
             try:
                 t0 = time.time()
-                r = requests.head(h + "/", headers=self.headers, timeout=6, allow_redirects=True)
+                r = requests.head(h + "/", headers=self.headers, timeout=3, allow_redirects=True)
                 dt = time.time() - t0
-                if r.status_code < 400 and dt < best_time:
-                    best, best_time = h, dt
-                    print(f"[{self.getName()}] 候选 {h} 响应 {dt:.2f}s")
+                if r.status_code < 400:
+                    return h, dt
             except Exception:
-                continue
+                pass
+            return None
+        best, best_time = None, float("inf")
+        with ThreadPoolExecutor(max_workers=min(len(hosts), 5)) as ex:
+            futs = {ex.submit(_probe, h): h for h in hosts}
+            for f in as_completed(futs, timeout=8):
+                res = f.result()
+                if res and res[1] < best_time:
+                    best, best_time = res
+        if best:
+            print(f"[{self.getName()}] 最快域名 {best} ({best_time:.2f}s)")
         return best
     def _auto_heal_host(self):
         hosts = self._discover_hosts() or self.fallback_hosts
