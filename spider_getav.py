@@ -25,7 +25,10 @@ class Spider(Spider):
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         }
-        self._auto_heal_host()
+        try:
+            self._auto_heal_host()
+        except Exception as e:
+            print(f"[{self.getName()}] init自愈跳过: {e}")
         self.headers["Referer"] = self.host + "/"
         self.categories = [
             {"type_id": "latest", "type_name": "最新上传"},
@@ -74,23 +77,29 @@ class Spider(Spider):
                 pass
             return None
         best, best_time = None, float("inf")
-        with ThreadPoolExecutor(max_workers=min(len(hosts), 5)) as ex:
-            futs = {ex.submit(_probe, h): h for h in hosts}
-            for f in as_completed(futs, timeout=8):
-                res = f.result()
-                if res and res[1] < best_time:
-                    best, best_time = res
+        try:
+            with ThreadPoolExecutor(max_workers=min(len(hosts), 5)) as ex:
+                futs = {ex.submit(_probe, h): h for h in hosts}
+                for f in as_completed(futs, timeout=8):
+                    res = f.result()
+                    if res and res[1] < best_time:
+                        best, best_time = res
+        except Exception as e:
+            print(f"[{self.getName()}] 域名探测异常: {e}")
         if best:
             print(f"[{self.getName()}] 最快域名 {best} ({best_time:.2f}s)")
         return best
     def _auto_heal_host(self):
-        hosts = self._discover_hosts() or self.fallback_hosts
-        best = self._pick_fastest(hosts)
-        if best and best != self.host:
-            print(f"[{self.getName()}] 域名自愈: {self.host} -> {best}")
-            self.host = best
-        else:
-            print(f"[{self.getName()}] 当前域名可用: {self.host}")
+        try:
+            hosts = self._discover_hosts() or self.fallback_hosts
+            best = self._pick_fastest(hosts)
+            if best and best != self.host:
+                print(f"[{self.getName()}] 域名自愈: {self.host} -> {best}")
+                self.host = best
+            else:
+                print(f"[{self.getName()}] 当前域名可用: {self.host}")
+        except Exception as e:
+            print(f"[{self.getName()}] 自愈跳过: {e}")
         return self.host
     def _get(self, url, timeout=15):
         try:
