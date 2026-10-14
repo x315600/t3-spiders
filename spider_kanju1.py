@@ -257,6 +257,8 @@ class Spider(_BaseSpider):
                 "vod_content": (d.get("description") or "").strip(),
             })
             total = int(d.get("episode_count") or d.get("total_episode_count") or 0)
+            # 标题 quote 后塞进 play_id：vid 几分钟就过期，播放时凭标题可重搜拿新 vid 自救
+            tq = urllib.parse.quote(vod.get("vod_name") or "", safe="")
             # 用第 1 集的单集 token 反解出真实线路列表
             lines = []
             try:
@@ -276,12 +278,12 @@ class Spider(_BaseSpider):
                 for opt in lines:
                     lid = str(opt.get("id") or opt.get("play_from") or "")
                     label = (str(opt.get("label") or lid or "线路")).replace("$", "＄").replace("#", "＃")
-                    eps_list = [f"第{i + 1}集${vid}@@{lid}@@{i}" for i in range(ep_n)]
+                    eps_list = [f"第{i + 1}集${vid}@@{lid}@@{i}@@{tq}" for i in range(ep_n)]
                     play_from.append(label)
                     play_url.append("#".join(eps_list))
             else:
                 # resolve 失败也先列出分集，播放时再试
-                eps_list = [f"第{i + 1}集${vid}@@@@{i}" for i in range(ep_n)]
+                eps_list = [f"第{i + 1}集${vid}@@@@{i}@@{tq}" for i in range(ep_n)]
                 play_from.append("默认线路")
                 play_url.append("#".join(eps_list))
             vod["vod_play_from"] = "$$$".join(play_from)
@@ -290,19 +292,8 @@ class Spider(_BaseSpider):
             pass
         return {"list": [vod]}
 
-    def playerContent(self, flag, id, vipFlags=None):
-        # id 格式：vid@@line_id@@episode_index（壳已切掉集名，只剩 play_id）
-        try:
-            parts = str(id).rsplit("$", 1)[-1].split("@@")
-            vid = parts[0] if len(parts) > 0 else ""
-            line_id = parts[1] if len(parts) > 1 else ""
-            ep_idx = int(parts[2]) if len(parts) > 2 and str(parts[2]).isdigit() else 0
-        except Exception:
-            return {"parse": 0, "msg": "播放参数解析失败"}
-        if not vid:
-            return {"parse": 0, "msg": "缺少 vid"}
-
-        # 真实播放链：单集 token -> resolve -> ticket -> resolve-line -> 直链
+    def _try_resolve(self, vid, line_id, ep_idx):
+        """真实播放链：单集 token -> resolve -> ticket -> resolve-line -> 直链。失败回空串。"""
         try:
             q = urllib.parse.quote(vid, safe="")
             base = (ep_idx // 200) * 200
@@ -310,15 +301,15 @@ class Spider(_BaseSpider):
             eps = e.get("episodes") or []
             li = ep_idx - base
             if li < 0 or li >= len(eps):
-                raise RuntimeError("集数越界")
+                return ""
             ep_token = eps[li].get("token") or ""
             if not ep_token:
-                raise RuntimeError("无单集 token")
+                return ""
             r = self._api("GET", "/v1/playback/resolve/" +
                           urllib.parse.quote(ep_token, safe="") + "?view=compact")
             opts = r.get("line_options") or []
             if not opts:
-                raise RuntimeError("无可用线路")
+                return ""
             pick = None
             for o in opts:
                 if line_id and line_id in (str(o.get("id") or ""),
@@ -331,16 +322,42 @@ class Spider(_BaseSpider):
             url = str(pick.get("url") or "")
             ticket = url[len("resolve://"):] if url.startswith("resolve://") else url
             if not ticket:
-                raise RuntimeError("无 ticket")
+                return ""
             r2 = self._api("POST", "/v1/playback/resolve-line?view=compact", {"ticket": ticket})
-            real = (((r2.get("a") or {}).get("line") or {}).get("url")
+            return (((r2.get("a") or {}).get("line") or {}).get("url")
                     or (r2.get("line") or {}).get("url")
                     or r2.get("url") or "")
-            if real:
-                return {"parse": 0, "url": real,
-                        "header": {"User-Agent": PLAYER_UA, "Referer": API_BASE + "/"}}
         except Exception:
-            pass
+            return ""
+
+    def playerContent(self, flag, id, vipFlags=None):
+        # id 格式：vid@@line_id@@episode_index@@title(quote)，title 供 vid 过期时自救
+        try:
+            parts = str(id).rsplit("$", 1)[-1].split("@@")
+            vid = parts[0] if len(parts) > 0 else ""
+            line_id = parts[1] if len(parts) > 1 else ""
+            ep_idx = int(parts[2]) if len(parts) > 2 and str(parts[2]).isdigit() else 0
+            title = urllib.parse.unquote(parts[3]) if len(parts) > 3 else ""
+        except Exception:
+            return {"parse": 0, "msg": "播放参数解析失败"}
+        if not vid:
+            return {"parse": 0, "msg": "缺少 vid"}
+
+        real = self._try_resolve(vid, line_id, ep_idx)
+        if not real and title:
+            # vid 疑似过期（variant id 几分钟就轮换）：用标题重搜拿新 vid 再试一次
+            try:
+                for s in self.searchContent(title, "", "1").get("list", []):
+                    nvid = s.get("vod_id") or ""
+                    if nvid and nvid != vid:
+                        real = self._try_resolve(nvid, line_id, ep_idx)
+                        if real:
+                            break
+            except Exception:
+                pass
+        if real:
+            return {"parse": 0, "url": real,
+                    "header": {"User-Agent": PLAYER_UA, "Referer": API_BASE + "/"}}
 
         # 降级：交壳解析播放页
         proxy = None
