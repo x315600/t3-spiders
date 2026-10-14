@@ -46,23 +46,13 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 PLAYER_UA = ("Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
 
-# 分类 intent 映射（/v1/browse/catalog 的 intent 参数）
-# 实测只有 latest_catalog 有效，其他分类走 content_kind 客户端过滤
-CATALOG_INTENTS = {
-    "latest": "latest_catalog",   # 最新
-    "movie": "latest_catalog",     # 电影（按 content_kind 过滤）
-    "series": "latest_catalog",    # 电视剧（按 content_kind 过滤）
-    "anime": "latest_catalog",     # 动漫（按 content_kind 过滤）
-    "variety": "latest_catalog",   # 综艺（按 content_kind 过滤）
-    "short": "latest_catalog",     # 短剧（按 content_kind 过滤）
-}
-# tid -> content_kind 过滤值
-KIND_FILTER = {
-    "movie": ("movie",),
-    "series": ("series", "tv"),
-    "anime": ("anime", "dongman"),
-    "variety": ("variety", "zongyi"),
-    "short": ("short_drama", "short"),
+# 分类 tid -> 服务端 kind 参数（API 原生支持 kind 过滤，实测 movie/series/anime/variety/short_drama 全有效）
+KIND_PARAM = {
+    "movie": "movie",
+    "series": "series",
+    "anime": "anime",
+    "variety": "variety",
+    "short": "short_drama",
 }
 
 
@@ -191,27 +181,18 @@ class Spider(_BaseSpider):
 
     def categoryContent(self, tid, pg, filter, extend):
         pg = int(pg) if str(pg).isdigit() else 1
-        intent = CATALOG_INTENTS.get(tid, "latest_catalog")
-        kinds = KIND_FILTER.get(tid)
+        params = {"page": pg, "limit": 20, "intent": "latest_catalog"}
+        kind = KIND_PARAM.get(tid)
+        if kind:
+            params["kind"] = kind
         try:
-            # 多拉几页做客户端过滤（API 不支持按类型过滤）
-            vods = []
-            fetch_pages = 3 if kinds else 1
-            for p in range(pg, pg + fetch_pages):
-                data = self._api("GET", "/v1/browse/catalog?" + urllib.parse.urlencode(
-                    {"page": p, "limit": 20, "intent": intent}))
-                for c in data.get("cards", []):
-                    if kinds and (c.get("content_kind") or "") not in kinds:
-                        continue
-                    vods.append(self._card(c))
-                if not kinds:
-                    pagination = data.get("pagination", {}) or {}
-                    pagecount = int(pagination.get("total_pages") or 1)
-                    total = int(pagination.get("total") or len(vods))
-                    return {"list": vods, "page": pg, "pagecount": max(pagecount, 1),
-                            "limit": 20, "total": total}
-            return {"list": vods[:20], "page": pg, "pagecount": 99,
-                    "limit": 20, "total": 99 * 20}
+            data = self._api("GET", "/v1/browse/catalog?" + urllib.parse.urlencode(params))
+            vods = [self._card(c) for c in data.get("cards", [])]
+            pagination = data.get("pagination", {}) or {}
+            total = int(pagination.get("total") or len(vods))
+            pagecount = max(1, -(-total // 20))
+            return {"list": vods, "page": pg, "pagecount": pagecount,
+                    "limit": 20, "total": total}
         except Exception:
             return {"list": [], "page": pg, "pagecount": 1, "limit": 20, "total": 0}
 
