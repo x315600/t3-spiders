@@ -169,7 +169,7 @@ class Spider(_BaseSpider):
         }
 
     # ---------- 六接口 ----------
-    def homeContent(self, isFilter, filter):
+    def homeContent(self, filter=False):
         classes = [
             {"type_id": "latest", "type_name": "最新"},
             {"type_id": "movie", "type_name": "电影"},
