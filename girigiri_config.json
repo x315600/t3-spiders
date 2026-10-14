@@ -47,6 +47,17 @@
       "filterable": 1,
       "changeable": 1,
       "ext": {}
+    },
+    {
+      "key": "anyshort",
+      "name": "AnyShort短劇",
+      "type": 3,
+      "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_anyshort.py",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1,
+      "changeable": 1,
+      "ext": {}
     }
   ],
   "lives": [],
