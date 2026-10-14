@@ -1,10 +1,10 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 # GetAV(spider_getav.py) - 日本AV站
-# host: https://getav.live
+# host: 自动从发布页(getav.info)轮询最快域名, 失败自愈切换
 # 列表: HTML /zh/genres/{tid}?page={pg}   详情: JSON /api/movies/{id}
 # 搜索: /zh/search?q={key}   播放: videoSources[].url 直链
-import re, json, requests
+import re, json, time, requests
 from urllib.parse import quote
 from lxml import etree
 from base.spider import Spider
@@ -13,11 +13,20 @@ class Spider(Spider):
     def getName(self):
         return "GetAV"
     def init(self, extend=""):
+        self.landing = "https://getav.info/zh/"
+        self.fallback_hosts = [
+            "https://getav.live",
+            "https://getav.net",
+            "https://getav.co",
+            "https://getav.me",
+            "https://getav.top",
+        ]
         self.host = "https://getav.live"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-            "Referer": self.host + "/",
         }
+        self._auto_heal_host()
+        self.headers["Referer"] = self.host + "/"
         self.categories = [
             {"type_id": "latest", "type_name": "最新上传"},
             {"type_id": "hot", "type_name": "热门"},
@@ -36,6 +45,44 @@ class Spider(Spider):
             {"type_id": "16", "type_name": "潮吹"},
             {"type_id": "18", "type_name": "苗条"},
         ]
+    def _discover_hosts(self):
+        try:
+            r = requests.get(self.landing, headers=self.headers, timeout=10)
+            r.encoding = r.apparent_encoding or "utf-8"
+            found = re.findall(r'"(https?://getav\.[a-z]+/)"', r.text)
+            hosts = []
+            for h in dict.fromkeys(found):
+                h = h.rstrip("/")
+                if h not in hosts:
+                    hosts.append(h)
+            if hosts:
+                print(f"[{self.getName()}] 发布页发现 {len(hosts)} 个镜像: {hosts}")
+                return hosts
+        except Exception as e:
+            print(f"[{self.getName()}] 发布页抓取失败: {e}")
+        return []
+    def _pick_fastest(self, hosts):
+        best, best_time = None, float("inf")
+        for h in hosts:
+            try:
+                t0 = time.time()
+                r = requests.head(h + "/", headers=self.headers, timeout=6, allow_redirects=True)
+                dt = time.time() - t0
+                if r.status_code < 400 and dt < best_time:
+                    best, best_time = h, dt
+                    print(f"[{self.getName()}] 候选 {h} 响应 {dt:.2f}s")
+            except Exception:
+                continue
+        return best
+    def _auto_heal_host(self):
+        hosts = self._discover_hosts() or self.fallback_hosts
+        best = self._pick_fastest(hosts)
+        if best and best != self.host:
+            print(f"[{self.getName()}] 域名自愈: {self.host} -> {best}")
+            self.host = best
+        else:
+            print(f"[{self.getName()}] 当前域名可用: {self.host}")
+        return self.host
     def _get(self, url, timeout=15):
         try:
             r = requests.get(url, headers=self.headers, timeout=timeout)
@@ -43,14 +90,36 @@ class Spider(Spider):
             return r.text
         except Exception as e:
             print(f"[ERROR] 请求失败: {url} - {e}")
-            return None
+        print(f"[{self.getName()}] 触发域名自愈...")
+        old = self.host
+        self._auto_heal_host()
+        self.headers["Referer"] = self.host + "/"
+        if self.host != old:
+            try:
+                url2 = url.replace(old, self.host)
+                r = requests.get(url2, headers=self.headers, timeout=timeout)
+                r.encoding = r.apparent_encoding or "utf-8"
+                return r.text
+            except Exception as e:
+                print(f"[ERROR] 自愈后重试失败: {url2} - {e}")
+        return None
     def _get_json(self, url, timeout=15):
         try:
             r = requests.get(url, headers=self.headers, timeout=timeout)
             return r.json()
         except Exception as e:
             print(f"[ERROR] JSON请求失败: {url} - {e}")
-            return {}
+        print(f"[{self.getName()}] 触发域名自愈...")
+        old = self.host
+        self._auto_heal_host()
+        self.headers["Referer"] = self.host + "/"
+        if self.host != old:
+            try:
+                r = requests.get(url.replace(old, self.host), headers=self.headers, timeout=timeout)
+                return r.json()
+            except Exception as e:
+                print(f"[ERROR] 自愈后重试失败: {e}")
+        return {}
     def _fix_url(self, u):
         if not u:
             return ""
