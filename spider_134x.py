@@ -23,6 +23,7 @@ def _unesc(s): return ESC_RE.sub(lambda m: ESC_MAP.get(m.group(1), m.group(1)), 
 def _pack(d): return base64.urlsafe_b64encode(json.dumps(d, separators=(",", ":")).encode()).decode().rstrip("=")
 def _unpack(s): return json.loads(base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)).decode())
 def _safe(s): return (s or "").replace("$", "＄").replace("#", "＃").strip()
+def _pic(u): return (u or "").replace("_normal.", "_400x400.")
 def _num(n):
     n = int(n or 0)
     return f"{n/10000:.1f}万" if n >= 10000 else str(n)
@@ -51,7 +52,7 @@ class Spider(SpiderBase):
     def _card(self, m):
         name, screen, pic, tid, text, media, dur, plays = m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7]
         mins = int(dur or 0) // 60000
-        return {"vod_id": tid, "vod_name": self._title(text, screen), "vod_pic": pic or "",
+        return {"vod_id": tid, "vod_name": self._title(text, screen), "vod_pic": _pic(pic),
                 "vod_remarks": f"{mins}分钟 · {_num(plays)}播放" if mins else f"{_num(plays)}播放"}
     def _parse_list(self, html):
         if not html: return []
@@ -90,6 +91,8 @@ class Spider(SpiderBase):
         hls = HLS_RE.search(html)
         variants = sorted(VAR_RE.findall(html), key=lambda v: int(v[1]), reverse=True)
         best_mp4 = variants[0][0] if variants else g[5]
+        poster = re.search(r'posterUrl:"(https?://[^"]+)"', html)
+        pic = poster.group(1) if poster else _pic(g[2])
         flags, urls = [], []
         if hls:
             flags.append("m3u8"); urls.append(f"m3u8${_pack({'u': hls.group(1)})}")
@@ -97,7 +100,7 @@ class Spider(SpiderBase):
             flags.append("MP4"); urls.append(f"MP4${_pack({'u': best_mp4})}")
         if not flags: return {"list": [], "msg": "无可用播放源"}
         mins = int(g[6] or 0) // 60000
-        vod = {"vod_id": tid, "vod_name": self._title(g[4], g[1]), "vod_pic": g[2] or "",
+        vod = {"vod_id": tid, "vod_name": self._title(g[4], g[1]), "vod_pic": pic,
                "vod_year": (g[11] or "")[:4], "vod_remarks": f"{mins}分钟" if mins else "",
                "vod_content": _safe(content)[:500], "vod_play_from": "$$$".join(flags), "vod_play_url": "$$$".join(urls)}
         return {"list": [vod]}
