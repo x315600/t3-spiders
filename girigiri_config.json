@@ -80,19 +80,6 @@
       "filterable": 0,
       "changeable": 1,
       "ext": {}
-    },
-    {
-      "key": "134x",
-      "name": "134X",
-      "type": 3,
-      "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_134x.py",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 0,
-      "changeable": 1,
-      "ext": {
-        "host": "https://134x.com"
-      }
     }
   ],
   "lives": [],

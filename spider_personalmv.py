@@ -2,6 +2,7 @@
 # 网站特征: UIKit·无加密·普通请求·分类4个·分页?page=N·搜索/cn/search?q=
 # m3u8特征: 有·/api/getmovie?type=640&id=取m3u8·AES-128加密·CDN分片·480P/2K双档
 # 最后验证: 2026-10-14 · 分类/搜索/详情/播放真实验证
+# 2K能力: 2026-10-14 · init(ext) 传 hls cookie 即解锁 2K 源（待实机验证，cookie 到位即测）
 
 try:
     from base.spider import Spider as _SpiderBase
@@ -35,9 +36,21 @@ class Spider(_SpiderBase):
             ("AV精选", "AV精选"),
             ("稀缺资源", "稀缺资源"),
         ]
+        # 2K 登录态：ext 传 hls cookie（运行时传入，绝不写入源/日志）
+        self._hls = ""
 
     def init(self, extend=""):
-        pass
+        # ext 形态：裸 cookie 值 / "hls=xxx" / '{"hls":"xxx"}'
+        try:
+            ext = str(extend or "").strip()
+            if ext.startswith("{"):
+                self._hls = str(json.loads(ext).get("hls", "")).strip()
+            elif ext:
+                self._hls = ext
+            if self._hls and "=" not in self._hls:
+                self._hls = "hls=" + self._hls
+        except Exception:
+            self._hls = ""
 
     def getName(self):
         return "personalmv"
@@ -45,11 +58,13 @@ class Spider(_SpiderBase):
     def getDependence(self):
         return []
 
-    def _get(self, url, headers=None):
+    def _get(self, url, headers=None, with_cookie=False):
         import requests
         h = dict(self.headers)
         if headers:
             h.update(headers)
+        if with_cookie and self._hls:
+            h["Cookie"] = self._hls
         try:
             r = requests.get(url, headers=h, timeout=12)
             if r.status_code < 400:
@@ -58,9 +73,9 @@ class Spider(_SpiderBase):
             pass
         return ""
 
-    def _get_json(self, url, headers=None):
+    def _get_json(self, url, headers=None, with_cookie=False):
         try:
-            return json.loads(self._get(url, headers))
+            return json.loads(self._get(url, headers, with_cookie))
         except Exception:
             return {}
 
@@ -179,8 +194,13 @@ class Spider(_SpiderBase):
             "vod_content": " ".join(tags[:12]),
         }
         if mid:
-            vod["vod_play_from"] = "480P"
-            vod["vod_play_url"] = "正片$%s" % mid
+            if self._hls:
+                # 登录态已配置：同时给出 2K 源
+                vod["vod_play_from"] = "480P$$$2K"
+                vod["vod_play_url"] = "正片$%s$$$正片$%s" % (mid, mid)
+            else:
+                vod["vod_play_from"] = "480P"
+                vod["vod_play_url"] = "正片$%s" % mid
         return {"list": [vod]}
 
     def searchContent(self, key, quick=False, pg="1"):
@@ -199,9 +219,15 @@ class Spider(_SpiderBase):
             pid = pid.split("|", 1)[0]
         if not pid:
             return {"parse": 0, "url": ""}
-        api = "%s/api/getmovie?type=640&id=%s" % (self.host, pid)
-        data = self._get_json(api, {"Referer": self.host + "/cn/movie/" + pid})
+        qtype = "2560" if str(flag) == "2K" else "640"
+        api = "%s/api/getmovie?type=%s&id=%s" % (self.host, qtype, pid)
+        data = self._get_json(api, {"Referer": self.host + "/cn/movie/" + pid},
+                              with_cookie=(qtype == "2560"))
         m3u8 = data.get("m3u8", "") if isinstance(data, dict) else ""
         if not m3u8:
             return {"parse": 0, "url": ""}
-        return {"parse": 0, "url": self._fix(m3u8), "header": dict(self.headers)}
+        header = dict(self.headers)
+        if qtype == "2560" and self._hls:
+            # 2K 分片拉取需要登录态，cookie 随播放头下发（运行时内存，不落盘）
+            header["Cookie"] = self._hls
+        return {"parse": 0, "url": self._fix(m3u8), "header": header}
