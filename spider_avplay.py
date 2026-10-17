@@ -343,12 +343,6 @@ class Spider:
             play_from.append("在線")
             play_url.append(eps)
 
-        # 3. 官方预览
-        pv = movie.get("preview_video_url")
-        if pv:
-            play_from.append("預覽")
-            play_url.append("預告片$" + self._clean(pv))
-
         item = {
             "vod_id": vid,
             "vod_name": name,
