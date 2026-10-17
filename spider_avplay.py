@@ -290,7 +290,8 @@ class Spider:
         name = ("%s %s" % (number, title)).strip() if number not in title else title
 
         actors = ", ".join(str(a.get("name")) for a in (movie.get("actors") or []) if a.get("name"))
-        tags = ", ".join(str(t.get("name")) for t in (movie.get("tags") or []) if t.get("name"))
+        tag_list = [str(t.get("name")).strip() for t in (movie.get("tags") or []) if t.get("name")]
+        tags = ", ".join(tag_list)
 
         parts = []
         if movie.get("summary"):
@@ -356,6 +357,9 @@ class Spider:
             "vod_play_from": "$$$".join(play_from),
             "vod_play_url": "$$$".join(play_url),
         }
+        # 标签点击搜索：vod_tag 供客户端渲染可点击标签
+        if tag_list:
+            item["vod_tag"] = ",".join(tag_list[:10])
         return {"list": [item]}
 
     def _javmenu_episodes(self, number):
