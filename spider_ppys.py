@@ -151,13 +151,28 @@ class Spider(BaseSpider):
 
     def _parse_list(self, html):
         vods = []
-        # 只解析主列表区, 排除猜你喜欢/排行等区块
-        m0 = re.search(r'<ul class="stui-vodlist clearfix">(.*?)</ul>',
-                       html, re.S)
-        html = m0.group(1) if m0 else html
+        if not html:
+            return vods
+        # 只解析主列表区, 排除猜你喜欢/排行等区块（多 pattern 兜底）
+        m0 = None
+        for pat in (r'<ul class="stui-vodlist clearfix">(.*?)</ul>',
+                    r'<ul class="stui-vodlist[^"]*">(.*?)</ul>',
+                    r'<div class="stui-vodlist[^"]*">(.*?)</div>'):
+            m0 = re.search(pat, html, re.S)
+            if m0:
+                break
+        scope = m0.group(1) if m0 else html
+        # 多种详情页 URL 格式兜底
+        link_pats = [r'<a[^>]*href="/voddetail/(\d+)\.html"[^>]*>',
+                     r'<a[^>]*href="/vod/detail/(\d+)\.html"[^>]*>',
+                     r'<a[^>]*href="[^"]*voddetail/(\d+)"[^>]*>']
+        links = []
+        for lp in link_pats:
+            links = list(re.finditer(lp, scope))
+            if links:
+                break
         # 两种结构: 图在 <a data-original> 上 / 图在内层 <img data-original> 上
-        for m in re.finditer(
-                r'<a[^>]*href="/voddetail/(\d+)\.html"[^>]*>', html):
+        for m in links:
             tag = m.group(0)
             vid = m.group(1)
             tm = re.search(r'title="([^"]+)"', tag)
@@ -165,9 +180,14 @@ class Spider(BaseSpider):
             # 1) a标签自身的图
             pm = re.search(r'data-original="([^"]+)"', tag)
             pic = pm.group(1) if pm else ""
+            # 1b) src 直链图兜底
+            if not pic:
+                sm = re.search(r'src="(https?://[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"', tag)
+                if sm:
+                    pic = sm.group(1)
             # 2) 内层 img 的图
             if not pic or "load.gif" in pic:
-                seg = html[m.end():m.end() + 1500]
+                seg = scope[m.end():m.end() + 1500]
                 im = re.search(r'data-original="([^"]+)"', seg)
                 # 确保是本项的 img (在下一个 <a href=/voddetail 之前)
                 nm = re.search(r'<a[^>]*href="/voddetail/', seg)
@@ -175,8 +195,14 @@ class Spider(BaseSpider):
                     pic = im.group(1)
             if "load.gif" in pic:
                 pic = ""
+            # 名称兜底: 取 a 标签内文本
+            if not name:
+                seg = scope[m.end():m.end() + 800]
+                tm2 = re.search(r'>([^<]{2,40})</a>', seg)
+                if tm2:
+                    name = tm2.group(1)
             remark = ""
-            seg = html[m.end():m.end() + 2000]
+            seg = scope[m.end():m.end() + 2000]
             rm = re.search(r'pic-text[^>]*>([^<]{1,20})<', seg)
             nm2 = re.search(r'<a[^>]*href="/voddetail/', seg)
             if rm and (not nm2 or rm.start() < nm2.start()):
