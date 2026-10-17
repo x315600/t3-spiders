@@ -20,9 +20,11 @@ SIGN_MIDDLE = "lpw6vgqzsp"
 SIGN_SALT = (
     "71cf27bb3c0bcdf207b64abecddc970098c7421ee7203b9cdae54478478a199e7d5a6e1a57691123c1a931c057842fb73ba3b3c83bcd69c17ccf174081e3d8aa"
 )
+# APK 真实 UA 系运行时从系统 WebView 抓取（AppUserAgentManager），无硬编码；
+# 此处用标准 Android WebView UA 格式代替桌面 Chrome UA
 UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36"
 )
 PAGE_SIZE = 24
 TIMEOUT = 15
@@ -112,15 +114,14 @@ class Spider:
         return str(value or "").replace("$", "＄").replace("#", "＃").strip()
 
     @staticmethod
-    def _fix_pic(url):
-        """图片 URL 绝对化"""
+    def _cover(url):
+        """tp.spfcas.com 返回的是加密流，换到真实直链 c0.jdbstatic.com。"""
         u = str(url or "").strip()
         if not u:
             return ""
-        if u.startswith("//"):
-            return "https:" + u
-        if u.startswith("/"):
-            return API_BASE + u
+        m = re.search(r"/covers/([a-z0-9]{2})/([A-Za-z0-9+/=_-]+)\.jpg", u)
+        if m:
+            return "https://c0.jdbstatic.com/covers/%s/%s.jpg" % (m.group(1), m.group(2))
         return u
 
     @staticmethod
@@ -141,18 +142,10 @@ class Spider:
         score = movie.get("score")
         if score:
             remark.insert(0, "★%.1f" % float(score))
-        pic = movie.get("cover_url") or movie.get("thumb_url") or ""
-        # 图片 URL 绝对化：补 https、补域名
-        if pic:
-            pic = pic.strip()
-            if pic.startswith("//"):
-                pic = "https:" + pic
-            elif pic.startswith("/"):
-                pic = API_BASE + pic
         return {
             "vod_id": mid,
             "vod_name": name,
-            "vod_pic": pic,
+            "vod_pic": Spider._cover(movie.get("cover_url") or movie.get("thumb_url") or ""),
             "vod_remarks": " ".join(remark) if remark else str(movie.get("release_date") or ""),
             "vod_year": str(movie.get("release_date") or "")[:4],
             "style": {"type": "rect", "ratio": 0.75},
@@ -359,7 +352,7 @@ class Spider:
         item = {
             "vod_id": vid,
             "vod_name": name,
-            "vod_pic": self._fix_pic(movie.get("cover_url") or movie.get("thumb_url") or ""),
+            "vod_pic": Spider._cover(movie.get("cover_url") or movie.get("thumb_url") or ""),
             "vod_remarks": str(movie.get("release_date") or "").strip(),
             "vod_year": str(movie.get("release_date") or "")[:4],
             "vod_area": "日本",
