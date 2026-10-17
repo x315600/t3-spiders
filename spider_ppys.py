@@ -296,9 +296,11 @@ class Spider(BaseSpider):
         if "敬请期待" in desc or "暂无简介" in desc:
             desc = ""
 
-        # 真实线路名: tab头 (如 稳定-BF) -> pane id
+        # 真实线路名: tab头 (如 稳定-BF) -> pane id；过滤掉瓜子线路
         tabs = re.findall(r'<a href="#(down[\d-]+)"[^>]*>([^<]{1,20})</a>', html)
-        tab_name = {tid_: self._clean(nm) for tid_, nm in tabs}
+        guazi_ids = {tid_ for tid_, nm in tabs if "瓜子" in self._clean(nm)}
+        tab_name = {tid_: self._clean(nm) for tid_, nm in tabs
+                    if tid_ not in guazi_ids}
 
         # 按 pane 分线路, 每个 pane 内的分集归属该线路名
         play_from, play_url = [], []
@@ -308,6 +310,8 @@ class Spider(BaseSpider):
         if not panes:
             panes = [("down1-1", html)]  # 兜底: 全页按 sid 分组
         for pane_id, pane_html in panes:
+            if pane_id in guazi_ids:
+                continue  # 跳过瓜子线路
             eps = re.findall(
                 r'href="/vodplay/(\d+)-(\d+)-(\d+)\.html"[^>]*>([^<]{1,30})</a>',
                 pane_html)
