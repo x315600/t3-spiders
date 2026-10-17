@@ -313,7 +313,13 @@ class Spider:
         play_from = []
         play_url = []
 
-        # 1. 磁力
+        # 1. JavMenu 在线播放（首位）
+        eps = self._javmenu_episodes(number)
+        if eps:
+            play_from.append("在線")
+            play_url.append(eps)
+
+        # 2. 磁力
         magnets = (self._api("/api/v1/movies/%s/magnets" % vid).get("magnets")) or []
         if magnets:
             magnets = sorted(
@@ -336,12 +342,6 @@ class Spider:
             if eps:
                 play_from.append("磁力")
                 play_url.append("#".join(eps))
-
-        # 2. JavMenu 在线播放
-        eps = self._javmenu_episodes(number)
-        if eps:
-            play_from.append("在線")
-            play_url.append(eps)
 
         item = {
             "vod_id": vid,
