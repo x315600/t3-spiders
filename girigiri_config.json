@@ -91,17 +91,6 @@
    "filterable": 1,
    "changeable": 1,
    "ext": {}
-  },
-  {
-   "key": "91porn",
-   "name": "91Porn",
-   "type": 3,
-   "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_91porn.py",
-   "searchable": 1,
-   "quickSearch": 1,
-   "filterable": 1,
-   "changeable": 1,
-   "ext": {}
   }
  ],
  "lives": [],
