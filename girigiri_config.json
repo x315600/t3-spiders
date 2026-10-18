@@ -67,6 +67,17 @@
    "filterable": 1,
    "changeable": 1,
    "ext": {}
+  },
+  {
+   "key": "ksksi",
+   "name": "视中心影院",
+   "type": 3,
+   "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_ksksi.py",
+   "searchable": 0,
+   "quickSearch": 0,
+   "filterable": 1,
+   "changeable": 1,
+   "ext": {}
   }
  ],
  "lives": [],
