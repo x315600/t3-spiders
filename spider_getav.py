@@ -309,7 +309,7 @@ class Spider(SpiderBase):
             "Connection": "keep-alive"
         }
         # 真请求并发打到所有候选 host，谁先成用谁（已验证 host 也参与，避免在慢 host 上白等）
-        host, data = self._race_api(api_path, headers, timeout=min(timeout, 6))
+        host, data = self._race_api(api_path, headers, timeout=min(timeout, 10))
         if data:
             if host not in self.hosts:
                 self.hosts.insert(0, host)
@@ -318,6 +318,20 @@ class Spider(SpiderBase):
             self._host_verified = True
             self.setCache("getav_live_host", host)
             return data
+        # 兜底: 并发赛跑全员超时(沙盒实测偶发, 约 1/5 概率)时, 按已验证 host 优先逐个串行重试一次,
+        # 用共享 opener(复用 TLS/cookie), 避免详情页直接报"暂无可用线路"
+        ordered = [self.baseHost] + [h for h in self.hosts if h != self.baseHost]
+        for h in ordered:
+            try:
+                data = self._api_once(api_path, h, headers, timeout=10, shared=True)
+            except Exception:
+                data = None
+            if data and self._valid_api_data(api_path, data):
+                self._host_idx = self.hosts.index(h) if h in self.hosts else 0
+                self.baseHost = h
+                self._host_verified = True
+                self.setCache("getav_live_host", h)
+                return data
         return {}
 
     def _format_poster(self, raw_url):

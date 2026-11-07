@@ -3,7 +3,9 @@
 逆向来源: AvPlay 2.0.0 (com.javrocket.playground)
   - 核心域名: https://jdforrepam.com (JavDB API)
   - 签名头:   jdSignature = {ts}.lpw6vgqzsp.{md5(ts+salt)}
-  - 播放来源: https://javmenu.com 解析详情页 m3u8
+  - 播放来源: JavMenu 详情页 m3u8 已失效 (2026-11-07 实测页面无播放器);
+    在线源改为 JavDB 官方 preview m3u8 (movie.preview_video_url);
+    完整正片 /api/v1/movies/{id}/play 需 JavDB 登录, 匿名不做
 """
 
 import hashlib
@@ -314,13 +316,20 @@ class Spider:
         play_from = []
         play_url = []
 
-        # 1. JavMenu 在线播放（首位）
+        # 1. JavMenu 在线播放（首位；2026-11-07 实测 javmenu 详情页已无 m3u8/播放器, 此路暂死, 保留作兜底）
         eps = self._javmenu_episodes(number)
         if eps:
             play_from.append("在線")
             play_url.append(eps)
 
-        # 2. 磁力
+        # 2. 预告片: JavDB 官方 preview m3u8 (ttm3u8, AES-128 分片, 2026-11-07 实测出真 #EXTM3U)。
+        # 完整正片接口 /api/v1/movies/{id}/play 需 JavDB 账号登录(JWT), 匿名拿不到, 故预告是目前唯一盒内可播的在线源
+        preview = (movie.get("preview_video_url") or "").strip()
+        if preview:
+            play_from.append("預告")
+            play_url.append("預告$%s" % preview)
+
+        # 3. 磁力
         magnets = (self._api("/api/v1/movies/%s/magnets" % vid).get("magnets")) or []
         if magnets:
             magnets = sorted(
