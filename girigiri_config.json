@@ -58,17 +58,6 @@
       "ext": {}
     },
     {
-      "key": "avplay",
-      "name": "AvPlay",
-      "type": 3,
-      "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_avplay.py",
-      "searchable": 1,
-      "quickSearch": 1,
-      "filterable": 1,
-      "changeable": 1,
-      "ext": {}
-    },
-    {
       "key": "ksksi",
       "name": "视中心影院",
       "type": 3,
