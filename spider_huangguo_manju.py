@@ -1,16 +1,26 @@
 # -*- coding: utf-8 -*-
 # 黄果漫剧 (q8jw.ltfqnhxx.cc) T3 spider — source-authoring 1.3.0 重写版
 # 与黄果短剧草稿同套前端/同封面 AES 密钥，但内容库独立（video id 不互通，2588 在旧站 404），故单独立源
-# 站点结构（2026-11-08 沙盒实测打通，1.3.0 流程重写复核）：
-#   分类: /tag/{slug}/            分页 /tag/{slug}/page/{pg}/   （data-pages 给总页数）
-#   频道: /ai-manju/              分页 /ai-manju/{pg}/          （data-pages 给总页数）
+# 站点结构（2026-11-08 取证，见 analyze-v3.json）：
+#   真实分类 = 导航栏 5 个频道（标签只是视频上的属性，不是分类）：
+#     视频类：ai-manju 原创漫剧、lifan-dongman 里番动漫、duanju 成人短剧
+#       走 /api/videos/category/{ch}?sort=latest|hot|random&page={pg}&size=18，
+#       响应 data.items + data.pagination{page,pages,size,total}；
+#       不带 sort 默认等于 hot；latest 与 HTML latest 面板同序
+#     漫画类：riman 成人日漫、hanman 成人韩漫
+#       走 /api/comics/category/{ch}?sort=new|hot|end&page={pg}&size=18，
+#       无 random，sort=latest 无效；item 字段 id/title/cover/status_line/tags
+#   标签筛选：HTML 单一 grid，无排序；/tag/{slug}/ 首页，/tag/{slug}/page/{pg}/ 分页
+#     （data-pages 给总页数；tag API 返回空，不可用；标签页只有视频，无漫画）
 #   搜索: /search/?keyword={kw}   分页 /search/video/{kw}/{pg}/
-#   详情: /video/{id}/  内嵌 <script id="videoInitialData" type="application/json">
+#   详情视频: /video/{id}/  内嵌 <script id="videoInitialData" type="application/json">
 #         -> epPlaySrcs {集号: m3u8直链}，tags / coverSrc / description 全有
-#   列表: 主列表是 hg-comic-feed-card（每页 20 条）；hg-drama-card 只有 4 条精选
-#         频道页有 最新/热播/随机 三个 tab，只取 hg-comic-card-grid is-active 那个
-#   封面: AES-CBC 加密字节（key/iv 与黄果短剧草稿相同，2026-11-08 实测可解出 JPEG）
-#         列表/详情的 vod_pic 走 localProxy，TV 端实时解密出图
+#   详情漫画: /comic/{id}/  纯图片章节，无视频/m3u8；详情只给信息，不给播放链接
+#         （漫画 id 在列表里加 "c" 前缀，如 c2919，与视频 id 区分）
+#   封面: pic.drleao.cn 的图是 AES-CBC 加密字节（key/iv 与黄果短剧草稿相同），
+#         列表/详情的 vod_pic 走 localProxy，TV 端实时解密出图；
+#         个别图（如漫画详情 og:image 在 imgpublic.ycomesc.live）本身就是 JPEG，
+#         localProxy 检测到 JPEG 魔数直接原样返回，不解密
 #   播放: m3u8 直链（带时效 auth_key，详情页打开时现取现用）
 """Buffered JSON GET for native net.req or observed legacy fetch.
 No source imports or network on import. Native timeout is ms; fetch is seconds.
@@ -405,20 +415,37 @@ HOSTS = ["https://q8jw.ltfqnhxx.cc"]
 IMG_KEY = b"f5d965df75336270"
 IMG_IV = b"97b60394abc2fbe1"
 
-# 频道：原创漫剧（/ai-manju/，分页 /ai-manju/{pg}/）
-CHANNELS = [("ai-manju", "原创漫剧")]
+# 真实频道：导航栏 5 个（2026-11-08 取证，见 analyze-v3.json）。
+# 标签只是视频上的属性，不是分类，旧版把 18 个标签冒充分类是错的。
+CHANNELS = [
+    ("ai-manju", "原创漫剧", "videos"),
+    ("lifan-dongman", "里番动漫", "videos"),
+    ("duanju", "成人短剧", "videos"),
+    ("riman", "成人日漫", "comics"),
+    ("hanman", "成人韩漫", "comics"),
+]
+CHANNEL_KIND = {tid: kind for tid, _name, kind in CHANNELS}
 
-# 默认分类：中性题材（均已在本站验证有数据）。站内另有成人频道
-# duanju/riman/hanman/lifan-dongman 及成人向标签 luanlun/lvmao/muzi/ntr/3p/
-# koujiao/juru-2/sm/nuelian/tianchong/huangdao/shunv/meimei/tongxue/jk/
-# nvjiaoshi/qiangzhi/chihan/gongxi/xingzhuan，需要再加（只注释、不启用）
-CATEGORIES = [
-    ("dushi", "都市"), ("xiandai", "现代"), ("zhichang", "职场"),
-    ("nixi", "逆袭"), ("gufeng", "古风"), ("xianxia", "仙侠"),
-    ("hougong", "后宫"), ("qihuan", "奇幻"), ("xitong", "系统"),
-    ("naodong", "脑洞"), ("dananzhu", "大男主"), ("yujie", "御姐"),
-    ("minguo", "民国"), ("wuxia", "武侠"), ("xuanhuan", "玄幻"),
-    ("xiuxian", "修仙"), ("youxi", "游戏"), ("danvzhu", "大女主"),
+# 排序选项（显示名，值）：视频类三档，漫画类三档（漫画无随机，latest 无效）
+SORTS = {
+    "videos": (("最新更新", "latest"), ("当前热播", "hot"), ("随机推荐", "random")),
+    "comics": (("最新推荐", "new"), ("人气漫画", "hot"), ("完结漫画", "end")),
+}
+SORT_DEFAULT = {"videos": "latest", "comics": "new"}
+API_SIZE = 18  # 站内 JS 的 SIZE
+
+# 标签筛选：站内真实存在的 slug，按 5 个频道页出现频次取前 24（中性 + 成人向混合）
+# 六个禁词不在其中，全站复扫 0 命中
+TAG_FILTERS = [
+    ("全部", ""),
+    ("都市", "dushi"), ("中文字幕", "zhongwen-zimu"), ("大男主", "dananzhu"),
+    ("现代", "xiandai"), ("无码", "wuma"), ("奇幻", "qihuan"),
+    ("后宫", "hougong"), ("ntr", "ntr"), ("系统", "xitong"),
+    ("男同", "nantong"), ("虐恋", "nuelian"), ("JK", "jk"),
+    ("职场", "zhichang"), ("H动漫", "hdongman"), ("大女主", "danvzhu"),
+    ("穿越", "chuanyue"), ("绿帽", "lvmao"), ("校园", "xiaoyuan"),
+    ("强制", "qiangzhi"), ("同学", "tongxue"), ("甜宠", "tianchong"),
+    ("sm", "sm"), ("古风", "gufeng"), ("仙侠", "xianxia"),
 ]
 
 
@@ -598,6 +625,111 @@ class Spider(BaseSpider):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read()
 
+    def _fetch_json(self, url, timeout=20):
+        # 站内 JSON API：/api/videos|comics/category/{ch}?sort=&page=&size=
+        req = urllib.request.Request(url if url.startswith("http") else self.host + url,
+                                     headers={"User-Agent": UA, "Referer": self.host + "/",
+                                              "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", "ignore")
+        try:
+            data = json.loads(raw)
+        except Exception:
+            raise ValueError("bad json from " + url)
+        if not isinstance(data, dict):
+            raise ValueError("bad api envelope from " + url)
+        if data.get("status") in (0, "0", False) or not isinstance(data.get("data"), dict):
+            # status=0 + 空 data：分类不存在 / 排序无效等，带上站方 msg
+            raise ValueError(str(data.get("msg") or "api error") + " @ " + url)
+        return data["data"]
+
+    def _parse_extend(self, extend):
+        # 壳传筛选：dict（FongMi/TVBox 常规）或 JSON 字符串；其它形态当空
+        try:
+            if isinstance(extend, dict):
+                return extend
+            if isinstance(extend, str) and extend.strip().startswith("{"):
+                parsed = json.loads(extend)
+                return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            pass
+        return {}
+
+    def _episode_remark(self, item):
+        # 与站内 JS 的 card() 同款文案：全N集 / 更新至N集 / 更新至1集
+        try:
+            if item.get("is_finished") and int(item.get("total_episodes") or 0) > 0:
+                return "全%d集" % int(item["total_episodes"])
+            if int(item.get("episode_count") or 0) > 0:
+                return "更新至%d集" % int(item["episode_count"])
+        except Exception:
+            pass
+        return "更新至1集"
+
+    def _api_cards(self, data, kind):
+        vods = []
+        seen = set()
+        for item in data.get("items") or []:
+            try:
+                vid = str(item.get("id") or "")
+                if not vid or vid in seen:
+                    continue
+                seen.add(vid)
+                tags = item.get("tags") or []
+                if kind == "comics":
+                    vods.append({
+                        "vod_id": "c" + vid,
+                        "vod_name": str(item.get("title") or "").replace("$", "＄").replace("#", "＃"),
+                        "vod_pic": self._pic(item.get("cover") or ""),
+                        "vod_remarks": str(item.get("status_line") or "").strip(),
+                        "vod_tag": ",".join(str(t) for t in tags),
+                    })
+                else:
+                    vods.append({
+                        "vod_id": vid,
+                        "vod_name": str(item.get("title") or "").replace("$", "＄").replace("#", "＃"),
+                        "vod_pic": self._pic(item.get("cover") or ""),
+                        "vod_remarks": self._episode_remark(item),
+                        "vod_tag": ",".join(str(t) for t in tags),
+                    })
+            except Exception:
+                continue
+        return vods
+
+    def _comic_dict(self, html):
+        # 漫画详情页：纯图片章节，无视频；只取信息，不取播放
+        def _meta(prop):
+            m = re.search(r'<meta property="%s" content="([^"]*)"' % re.escape(prop), html)
+            return (m.group(1).strip() if m else "")
+        title = _meta("og:title")
+        if title.endswith(" - 黄果漫剧"):
+            title = title[:-len(" - 黄果漫剧")]
+        m = re.search(r'<meta name="description" content="([^"]*)"', html)
+        desc = m.group(1).strip() if m else ""
+        tags = [n for _s, n in re.findall(r'href="/tag/([a-z0-9\-]+)/"[^>]*>([^<]+)</a>', html)]
+        chapters = sorted(set(re.findall(r'/chapter/(\d+)/', html)), key=lambda x: int(x))
+        status = ""
+        m = re.search(r'更新至\d+话|已完结|连载中', html)
+        if m:
+            status = m.group(0)
+        return {"title": title, "cover": _meta("og:image"), "description": desc,
+                "tags": tags, "chapters": chapters, "status": status}
+
+    def _comic_vod(self, vid, o):
+        # 漫画在视频盒子上无法播放：只给信息，不给播放链接（不伪造 m3u8）
+        ch = o.get("chapters") or []
+        remark = o.get("status") or (("共%d话" % len(ch)) if ch else "漫画")
+        return {
+            "vod_id": vid,
+            "vod_name": (o.get("title") or "").replace("$", "＄").replace("#", "＃"),
+            "vod_pic": self._pic(o.get("cover") or ""),
+            "vod_content": (o.get("description") or "").strip(),
+            "vod_tag": ",".join(o.get("tags") or []),
+            "vod_remarks": remark,
+            "vod_play_from": "漫画",
+            "vod_play_url": "",
+        }
+
     # ----- 封面：走 localProxy 解密 -----
     def _pic(self, url):
         if not url:
@@ -628,15 +760,19 @@ class Spider(BaseSpider):
         seen = set()
         for part in re.split(r'<div class="hg-comic-feed-card"', body)[1:]:
             try:
-                m = re.search(r'href="(/video/(\d+)/)"', part)
-                if not m or m.group(2) in seen:
+                # 视频 /video/{id}/ 与漫画 /comic/{id}/ 都可能出现；漫画 id 加 "c" 前缀区分
+                m = re.search(r'href="/(video|comic)/(\d+)/"', part)
+                if not m:
+                    continue
+                vid = m.group(2) if m.group(1) == "video" else "c" + m.group(2)
+                if vid in seen:
                     continue
                 t = re.search(r"<h3>([^<]+)</h3>", part)
                 img = re.search(r'data-src="([^"]+)"', part)
                 ep = re.search(r'hg-comic-feed-card__episode"[^>]*>(.*?)</span>', part, re.S)
-                seen.add(m.group(2))
+                seen.add(vid)
                 vods.append({
-                    "vod_id": m.group(2),
+                    "vod_id": vid,
                     "vod_name": (t.group(1).strip() if t else "").replace("$", "＄").replace("#", "＃"),
                     "vod_pic": self._pic(img.group(1)) if img else "",
                     "vod_remarks": re.sub(r"<[^>]+>", "", ep.group(1)).strip() if ep else "",
@@ -648,16 +784,19 @@ class Spider(BaseSpider):
         # 兜底：只有 4 条精选 hg-drama-card 的页面（如旧站形态），才解析它
         for part in re.split(r'<div class="hg-drama-card"', body)[1:]:
             try:
-                m = re.search(r'href="(/video/(\d+)/)"', part)
-                if not m or m.group(2) in seen:
+                m = re.search(r'href="/(video|comic)/(\d+)/"', part)
+                if not m:
+                    continue
+                vid = m.group(2) if m.group(1) == "video" else "c" + m.group(2)
+                if vid in seen:
                     continue
                 t = re.search(r'hg-drama-card__title"><a[^>]*>([^<]+)', part)
                 img = re.search(r'data-src="([^"]+)"', part)
                 ep = re.search(r'hg-drama-card__episode"[^>]*>(.*?)</span>', part, re.S)
                 score = re.search(r'hg-drama-card__score">([^<]+)</span>', part)
-                seen.add(m.group(2))
+                seen.add(vid)
                 vods.append({
-                    "vod_id": m.group(2),
+                    "vod_id": vid,
                     "vod_name": (t.group(1).strip() if t else "").replace("$", "＄").replace("#", "＃"),
                     "vod_pic": self._pic(img.group(1)) if img else "",
                     "vod_remarks": (re.sub(r"<[^>]+>", "", ep.group(1)).strip() if ep else "")
@@ -675,8 +814,7 @@ class Spider(BaseSpider):
         return max(pages) if pages else 1
 
     def _category_path(self, tid, pg):
-        if tid in dict(CHANNELS):
-            return "/ai-manju/" if pg <= 1 else f"/ai-manju/{pg}/"
+        # 标签筛选专用：/tag/{slug}/ 与 /tag/{slug}/page/{pg}/（HTML 单一 grid）
         return f"/tag/{tid}/" if pg <= 1 else f"/tag/{tid}/page/{pg}/"
 
     def _video_dict(self, html):
@@ -715,22 +853,39 @@ class Spider(BaseSpider):
             return [('fetch-list', '/')]
         if operation == 'category':
             pg = int(arguments['pg']) if arguments['pg'] else 1
-            return [('fetch-list', self._category_path(arguments['tid'], pg))]
+            tid = str(arguments['tid'])
+            ext = self._parse_extend(arguments.get('extend'))
+            tag = (ext.get('tag') or '').strip()
+            if tag:
+                # 选了标签：标签页是 HTML、无排序，排序选择此时忽略
+                return [('fetch-list', self._category_path(tag, pg))]
+            kind = CHANNEL_KIND.get(tid, 'videos')
+            sort = (ext.get('sort') or '').strip() or SORT_DEFAULT[kind]
+            if sort not in {v for _n, v in SORTS[kind]}:
+                sort = SORT_DEFAULT[kind]
+            api = 'videos' if kind == 'videos' else 'comics'
+            url = f"/api/{api}/category/{tid}?sort={sort}&page={pg}&size={API_SIZE}"
+            return [('fetch-api', url)]
         if operation == 'search':
             pg = int(arguments['pg']) if arguments['pg'] else 1
             kw = urllib.parse.quote(arguments['key'])
             path = f"/search/?keyword={kw}" if pg <= 1 else f"/search/video/{kw}/{pg}/"
             return [('fetch-list', path)]
         if operation == 'detail':
-            return [('fetch-detail', f"/video/{arguments['id']}/")]
+            vid = str(arguments['id'])
+            if vid.startswith('c') and vid[1:].isdigit():
+                return [('fetch-comic-detail', f"/comic/{vid[1:]}/")]
+            return [('fetch-detail', f"/video/{vid}/")]
         if operation == 'player':
             return [('static-player', None)]
         self._unbound('mixed step order, depends_on and ID handoff')
 
     def _fetch_mixed_step(self, step, arguments, previous):
         kind, payload = step
-        if kind in ('fetch-list', 'fetch-detail'):
+        if kind in ('fetch-list', 'fetch-detail', 'fetch-comic-detail'):
             return self._fetch(payload)[0]
+        if kind == 'fetch-api':
+            return self._fetch_json(payload)
         if kind in ('static-home', 'static-player'):
             return None
         self._unbound('mixed per-step endpoint/method and separate header scope')
@@ -738,11 +893,17 @@ class Spider(BaseSpider):
     def _parse_mixed_step(self, step, response, arguments, previous):
         kind, payload = step
         if kind == 'static-home':
-            return {'classes': [{"type_id": tid, "type_name": name} for tid, name in CHANNELS + CATEGORIES]}
+            return {'classes': [{"type_id": tid, "type_name": name} for tid, name, _k in CHANNELS]}
         if kind == 'fetch-list':
             return {'cards': self._parse_cards(response), 'pagecount': self._pagecount(response)}
+        if kind == 'fetch-api':
+            kind = CHANNEL_KIND.get(str(arguments.get('tid')), 'videos')
+            pages = (response.get('pagination') or {}).get('pages') or 1
+            return {'cards': self._api_cards(response, kind), 'pagecount': int(pages)}
         if kind == 'fetch-detail':
             return {'detail': self._video_dict(response)}
+        if kind == 'fetch-comic-detail':
+            return {'detail': self._comic_dict(response), 'comic': True}
         if kind == 'static-player':
             return {'url': arguments['id']}
         self._unbound('mixed per-step HTML selectors/API paths and dependency IDs')
@@ -763,6 +924,8 @@ class Spider(BaseSpider):
         if operation == 'search':
             return {'cards': parsed.get('cards', [])}
         if operation == 'detail':
+            if parsed.get('comic'):
+                return {'vod': self._comic_vod(arguments['id'], parsed.get('detail', {}))}
             return {'vod': self._detail_vod(arguments['id'], parsed.get('detail', {}))}
         if operation == 'player':
             return {'url': parsed.get('url', '')}
@@ -771,7 +934,13 @@ class Spider(BaseSpider):
     def _host_dict(self, operation, parsed, arguments):
         # detail 返回 ONE vod 行，detailContent 负责包外层 list
         if operation == 'home':
-            return {"class": parsed.get('classes', []), "list": [], "filters": {}}
+            filters = {}
+            for tid, _name, kind in CHANNELS:
+                filters[tid] = filter_ui([
+                    FilterSpec(key='sort', name='排序', param='sort', values=SORTS[kind]),
+                    FilterSpec(key='tag', name='标签', param='tag', values=tuple(TAG_FILTERS)),
+                ])
+            return {"class": parsed.get('classes', []), "list": [], "filters": filters}
         if operation == 'homeVideo':
             return {"list": parsed.get('cards', [])[:20]}
         if operation == 'category':
@@ -864,6 +1033,9 @@ class Spider(BaseSpider):
             p = param or {}
             if isinstance(p, dict) and p.get("type") == "img" and p.get("url"):
                 raw = self._fetch_bytes(p["url"])
+                if raw[:3] == b"\xff\xd8\xff":
+                    # 本身就是 JPEG（如漫画详情 og:image 在 imgpublic 域），原样返回不解密
+                    return [200, "image/jpeg", raw]
                 plain = _aes_cbc_decrypt(raw)
                 return [200, "image/jpeg", plain]
         except Exception:
