@@ -554,11 +554,20 @@ class Spider(BaseSpider):
         self._ready = False
         self.config = {}
         self.host = HOSTS[0]
-        if not isinstance(extend, str):
-            raise TypeError('ext must be JSON object text')
-        config = json.loads(extend) if extend else {}
-        if not isinstance(config, dict):
-            raise ValueError('ext must be a JSON object')
+        # ext 形态不固定：字符串 JSON / 已解析 dict / None / 空串都要能进，
+        # 绝不抛错（2026-11-08 教训：旧版生成器只认 str，壳传 dict 时 init
+        # 抛 TypeError，全部分类变空 + pagecount=1，盒子上就是“没数据、翻不了页”）
+        try:
+            if isinstance(extend, dict):
+                config = extend
+            elif isinstance(extend, str) and extend.strip():
+                config = json.loads(extend)
+            else:
+                config = {}
+            if not isinstance(config, dict):
+                config = {}
+        except Exception:
+            config = {}
         self.config = config
         if isinstance(config.get("host"), str) and config["host"].strip():
             self.host = config["host"].rstrip("/")
@@ -811,9 +820,17 @@ class Spider(BaseSpider):
     def categoryContent(self, tid, pg, filter, extend):
         try:
             return self._run('category', {'tid': tid, 'pg': pg, 'filter': filter, 'extend': extend})
-        except Exception:
+        except Exception as e:
+            # 失败必须看得见：旧写法静默返回空列表 + pagecount=1，盒子上
+            # 超时和解析错都长得跟“没数据、没下一页”一样，门禁也抓不到。
+            # 现在返回一条报错项，点开无害（detail 对 __error__ 返回空）。
             pg = int(pg) if pg else 1
-            return {"page": pg, "pagecount": 1, "limit": 20, "total": 0, "list": []}
+            return {"page": pg, "pagecount": 1, "limit": 20, "total": 0, "list": [{
+                "vod_id": "__error__",
+                "vod_name": "加载失败：" + type(e).__name__ + " " + str(e)[:80],
+                "vod_pic": "",
+                "vod_remarks": "分类 " + str(tid) + " 第 " + str(pg) + " 页",
+            }]}
 
     def searchContent(self, key, quick, pg="1"):
         try:
