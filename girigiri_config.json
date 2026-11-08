@@ -78,6 +78,19 @@
       "filterable": 1,
       "changeable": 1,
       "ext": {}
+    },
+    {
+      "key": "huangguomanju",
+      "name": "黄果漫剧",
+      "type": 3,
+      "api": "https://raw.githubusercontent.com/x315600/t3-spiders/main/spider_huangguo_manju.py",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filterable": 1,
+      "changeable": 1,
+      "ext": {
+        "host": "https://q8jw.ltfqnhxx.cc"
+      }
     }
   ],
   "lives": [],
