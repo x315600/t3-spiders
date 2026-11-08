@@ -415,6 +415,21 @@ HOSTS = ["https://q8jw.ltfqnhxx.cc"]
 IMG_KEY = b"f5d965df75336270"
 IMG_IV = b"97b60394abc2fbe1"
 
+# 禁词过滤：命中标题或标签的条目直接丢弃（列表层 + 详情层）。
+# 词以 unicode 转义存放，避免字面出现在文件里；运行时解码后比对。
+# 背景：2026-11-08 取证发现漫画侧 API 有条目标签含禁词（如 riman hot p2、
+# hanman new p2），视频侧 p1/p2 干净；过滤器保证盒子上永远不出现这类条目。
+_BANNED = (
+    "\u5e7c\u5973", "\u5c0f\u5b66\u751f", "\u521d\u4e2d\u751f",
+    "\u841d\u8389", "\u5e7c\u9f7f", "\u672a\u6210\u5e74",
+)
+
+
+def _banned(text):
+    s = str(text or "")
+    return any(w in s for w in _BANNED)
+
+
 # 真实频道：导航栏 5 个（2026-11-08 取证，见 analyze-v3.json）。
 # 标签只是视频上的属性，不是分类，旧版把 18 个标签冒充分类是错的。
 CHANNELS = [
@@ -676,6 +691,8 @@ class Spider(BaseSpider):
                     continue
                 seen.add(vid)
                 tags = item.get("tags") or []
+                if _banned(item.get("title")) or _banned(",".join(str(t) for t in tags)):
+                    continue
                 if kind == "comics":
                     vods.append({
                         "vod_id": "c" + vid,
@@ -717,6 +734,8 @@ class Spider(BaseSpider):
 
     def _comic_vod(self, vid, o):
         # 漫画在视频盒子上无法播放：只给信息，不给播放链接（不伪造 m3u8）
+        if _banned(o.get("title")) or _banned(",".join(o.get("tags") or [])):
+            raise ValueError("banned content")
         ch = o.get("chapters") or []
         remark = o.get("status") or (("共%d话" % len(ch)) if ch else "漫画")
         return {
@@ -768,6 +787,9 @@ class Spider(BaseSpider):
                 if vid in seen:
                     continue
                 t = re.search(r"<h3>([^<]+)</h3>", part)
+                title = t.group(1).strip() if t else ""
+                if _banned(title):
+                    continue
                 img = re.search(r'data-src="([^"]+)"', part)
                 ep = re.search(r'hg-comic-feed-card__episode"[^>]*>(.*?)</span>', part, re.S)
                 seen.add(vid)
@@ -827,6 +849,9 @@ class Spider(BaseSpider):
             return json.loads(m.group(1))
 
     def _detail_vod(self, vid, o):
+        tags = o.get("tags") or []
+        if _banned(o.get("title")) or _banned(",".join(tags)):
+            raise ValueError("banned content")
         eps = o.get("epPlaySrcs") or {}
         keys = sorted(eps.keys(), key=lambda x: int(x) if str(x).isdigit() else 0)
         panel = [(f"第{k}集", eps[k]) for k in keys if eps[k]]
