@@ -231,6 +231,10 @@ class Spider(BaseSpider):
                     if eps:
                         sources.append(src)
                         episodes.append("#".join(eps))
+                # 自营线是站外嵌页（iqiyi 等）需 parse:1 嗅探、盒子上最易播不了，后置；直链线在前
+                order = sorted(range(len(sources)), key=lambda i: 1 if sources[i].startswith("自营") else 0)
+                sources = [sources[i] for i in order]
+                episodes = [episodes[i] for i in order]
                 result["list"].append({"vod_id": str(vid), "vod_name": name, "vod_pic": pic, "vod_remarks": remarks, "vod_director": director, "vod_actor": actor, "vod_year": year, "vod_area": area, "vod_class": vclass, "vod_content": content, "vod_play_from": "$$$".join(sources), "vod_play_url": "$$$".join(episodes)})
             except Exception:
                 continue
