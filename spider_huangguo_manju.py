@@ -463,6 +463,9 @@ TAG_FILTERS = [
     ("sm", "sm"), ("古风", "gufeng"), ("仙侠", "xianxia"),
 ]
 
+# 标签显示名 → slug（壳传显示名时映射回 slug；“全部”→ 空，即不过滤）
+_TAG_BY_NAME = {n: v for n, v in TAG_FILTERS}
+
 
 # ---------- 纯 Python AES-128（TV 端无 pycryptodome 时的兜底） ----------
 def _gf_mul(a, b):
@@ -660,15 +663,26 @@ class Spider(BaseSpider):
 
     def _parse_extend(self, extend):
         # 壳传筛选：dict（FongMi/TVBox 常规）或 JSON 字符串；其它形态当空
+        # 值要做容错：有的壳传列表（取首项）、有的传非字符串（转字符串），
+        # 否则下游 .strip() 直接抛错，整分类变“加载失败”
         try:
             if isinstance(extend, dict):
-                return extend
-            if isinstance(extend, str) and extend.strip().startswith("{"):
+                raw = extend
+            elif isinstance(extend, str) and extend.strip().startswith("{"):
                 parsed = json.loads(extend)
-                return parsed if isinstance(parsed, dict) else {}
+                raw = parsed if isinstance(parsed, dict) else {}
+            else:
+                return {}
         except Exception:
-            pass
-        return {}
+            return {}
+        out = {}
+        for k, v in raw.items():
+            if isinstance(v, (list, tuple)):
+                v = v[0] if v else ""
+            if not isinstance(v, str):
+                v = "" if v is None else str(v)
+            out[str(k)] = v
+        return out
 
     def _episode_remark(self, item):
         # 与站内 JS 的 card() 同款文案：全N集 / 更新至N集 / 更新至1集
@@ -837,6 +851,8 @@ class Spider(BaseSpider):
 
     def _category_path(self, tid, pg):
         # 标签筛选专用：/tag/{slug}/ 与 /tag/{slug}/page/{pg}/（HTML 单一 grid）
+        # slug 做 URL 编码，非 ASCII 标签不再让 urllib 直接抛错
+        tid = urllib.parse.quote(str(tid), safe='')
         return f"/tag/{tid}/" if pg <= 1 else f"/tag/{tid}/page/{pg}/"
 
     def _video_dict(self, html):
@@ -881,6 +897,7 @@ class Spider(BaseSpider):
             tid = str(arguments['tid'])
             ext = self._parse_extend(arguments.get('extend'))
             tag = (ext.get('tag') or '').strip()
+            tag = _TAG_BY_NAME.get(tag, tag)  # 壳传显示名（都市/全部）时映射回 slug/空
             if tag:
                 # 选了标签：标签页是 HTML、无排序，排序选择此时忽略
                 return [('fetch-list', self._category_path(tag, pg))]
